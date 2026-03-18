@@ -16,20 +16,20 @@ function getConfig() {
 
   if (!cfg || typeof cfg !== "object") {
     throw new Error(
-      "Missing config. Copy config.sample.js to config.js and set homeStations/workStations."
+      "Missing config. Copy config.sample.js to config.js and set homeStationCodes/workStationCodes."
     );
   }
 
-  if (!Array.isArray(cfg.homeStations) || !Array.isArray(cfg.workStations)) {
-    throw new Error("Config must contain homeStations and workStations arrays.");
+  if (!Array.isArray(cfg.homeStationCodes) || !Array.isArray(cfg.workStationCodes)) {
+    throw new Error("Config must contain homeStationCodes and workStationCodes arrays.");
   }
 
   const normalized = {
-    homeStations: cfg.homeStations.map((s) => String(s).trim()).filter(Boolean),
-    workStations: cfg.workStations.map((s) => String(s).trim()).filter(Boolean),
+    homeStationCodes: cfg.homeStationCodes.map((s) => String(s).trim()).filter(Boolean),
+    workStationCodes: cfg.workStationCodes.map((s) => String(s).trim()).filter(Boolean),
   };
 
-  if (normalized.homeStations.length === 0 || normalized.workStations.length === 0) {
+  if (normalized.homeStationCodes.length === 0 || normalized.workStationCodes.length === 0) {
     throw new Error("Config arrays cannot be empty.");
   }
 
@@ -37,7 +37,7 @@ function getConfig() {
 }
 
 function escapeForOdsql(value) {
-  return value.replace(/'/g, "''");
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
 
 function formatTime(value) {
@@ -74,11 +74,11 @@ function clearError() {
   errorText.textContent = "";
 }
 
-function renderStationList(container, stations, valuesByName, kind) {
+function renderStationList(container, stationCodes, valuesByCode, kind) {
   container.innerHTML = "";
 
-  for (const stationName of stations) {
-    const record = valuesByName.get(stationName);
+  for (const stationCode of stationCodes) {
+    const record = valuesByCode.get(stationCode);
     const li = document.createElement("li");
     li.className = "station-item";
 
@@ -87,7 +87,7 @@ function renderStationList(container, stations, valuesByName, kind) {
 
     const nameEl = document.createElement("span");
     nameEl.className = "station-name";
-    nameEl.textContent = stationName;
+    nameEl.textContent = record ? `${record.name} (${record.stationcode})` : `Station ${stationCode}`;
 
     const valueEl = document.createElement("span");
     valueEl.className = "station-value";
@@ -101,7 +101,7 @@ function renderStationList(container, stations, valuesByName, kind) {
       sub.textContent = `Updated ${formatTime(record.duedate)}`;
     } else {
       valueEl.textContent = "N/A";
-      sub.textContent = "Station not found in current feed response.";
+      sub.textContent = "Station code not found in current feed response.";
     }
 
     top.append(nameEl, valueEl);
@@ -110,13 +110,15 @@ function renderStationList(container, stations, valuesByName, kind) {
   }
 }
 
-function buildUrl(allStations) {
-  const whereParts = allStations.map((name) => `name = '${escapeForOdsql(name)}'`);
+function buildUrl(allStationCodes) {
+  const whereParts = allStationCodes.map(
+    (stationCode) => `stationcode = '${escapeForOdsql(stationCode)}'`
+  );
 
   const params = new URLSearchParams({
     select: "name,stationcode,ebike,numdocksavailable,duedate",
     where: whereParts.join(" OR "),
-    limit: String(Math.max(allStations.length * 3, 20)),
+    limit: String(Math.max(allStationCodes.length * 3, 20)),
   });
 
   return `${DATASET_ENDPOINT}?${params.toString()}`;
@@ -141,8 +143,10 @@ async function fetchAndRender() {
   setLoading(true);
   setStatus("Fetching latest Velib data...");
 
-  const allStations = Array.from(new Set([...config.homeStations, ...config.workStations]));
-  const url = buildUrl(allStations);
+  const allStationCodes = Array.from(
+    new Set([...config.homeStationCodes, ...config.workStationCodes])
+  );
+  const url = buildUrl(allStationCodes);
 
   try {
     const response = await fetch(url, {
@@ -159,28 +163,28 @@ async function fetchAndRender() {
     const payload = await response.json();
     const records = Array.isArray(payload.results) ? payload.results : [];
 
-    const byName = new Map();
+    const byCode = new Map();
     for (const record of records) {
-      if (record && typeof record.name === "string") {
-        byName.set(record.name, record);
+      if (record && typeof record.stationcode === "string") {
+        byCode.set(record.stationcode, record);
       }
     }
 
-    const homeTotalValue = config.homeStations.reduce((sum, stationName) => {
-      const record = byName.get(stationName);
+    const homeTotalValue = config.homeStationCodes.reduce((sum, stationCode) => {
+      const record = byCode.get(stationCode);
       return sum + (record ? Number(record.ebike || 0) : 0);
     }, 0);
 
-    const workTotalValue = config.workStations.reduce((sum, stationName) => {
-      const record = byName.get(stationName);
+    const workTotalValue = config.workStationCodes.reduce((sum, stationCode) => {
+      const record = byCode.get(stationCode);
       return sum + (record ? Number(record.numdocksavailable || 0) : 0);
     }, 0);
 
     homeTotal.textContent = String(homeTotalValue);
     workTotal.textContent = String(workTotalValue);
 
-    renderStationList(homeList, config.homeStations, byName, "home");
-    renderStationList(workList, config.workStations, byName, "work");
+    renderStationList(homeList, config.homeStationCodes, byCode, "home");
+    renderStationList(workList, config.workStationCodes, byCode, "work");
 
     setStatus(`Last refresh: ${new Date().toLocaleString()}`);
     clearError();

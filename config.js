@@ -1,14 +1,14 @@
 window.VELIB_CONFIG = {
-  // Set exactly three nearby station names for home and work.
-  // Names must match the OpenData `name` field.
-  homeStations: [
-    "Turbigo - Réaumur",
-    "Archives - Pastourelle",
-    "Bourg l'Abbé - Saint-Martin"
+  // Set exactly three nearby station codes for home and work.
+  // Codes are more stable than station names.
+  homeStationCodes: [
+    "3011",
+    "3007",
+    "3102"
   ],
-  workStations: [
-    "Village Saint-Paul",
-    "Saint-Antoine Sévigné",
-    "Neuve Saint-Pierre - Beautreillis"
+  workStationCodes: [
+    "4009",
+    "4010",
+    "4110"
   ]
 };

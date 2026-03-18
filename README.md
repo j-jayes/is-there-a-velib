@@ -11,7 +11,7 @@ Yes. This project is a static client-only site and works on GitHub Pages.
 
 Important constraint:
 - Browser apps cannot keep runtime secrets truly secret.
-- So this app uses a public config file (`config.js`) with station names.
+- So this app uses a public config file (`config.js`) with station codes.
 - No backend/FastAPI is required for this use case.
 
 ## Data source
@@ -33,14 +33,15 @@ Edit `config.js`:
 
 ```js
 window.VELIB_CONFIG = {
-  homeStations: ["Name 1", "Name 2", "Name 3"],
-  workStations: ["Name 1", "Name 2", "Name 3"]
+  homeStationCodes: ["3011", "3007", "3102"],
+  workStationCodes: ["4009", "4010", "4110"]
 };
 ```
 
 Notes:
-- Station names must match OpenData `name` exactly.
-- If a name does not match, the UI shows `N/A` for that row.
+- Station codes are OpenData `stationcode` values.
+- Codes are more robust than names (no accent/apostrophe issues).
+- If a code does not match, the UI shows `N/A` for that row.
 
 ## Behavior
 
@@ -72,6 +73,6 @@ Then open `http://localhost:8080`.
 - Error: config missing
   - Ensure `config.js` exists and defines `window.VELIB_CONFIG`.
 - Rows show `N/A`
-  - Verify station names exactly match the OpenData station `name` values.
+  - Verify station codes match the OpenData `stationcode` values.
 - Refresh failed
   - Check network connectivity and retry.
