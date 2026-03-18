@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>is there a velib?</title>
+    <meta
+      name="description"
+      content="Quick Velib check: electric bikes near home and free docks near work."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="bg-shape bg-shape-a" aria-hidden="true"></div>
+    <div class="bg-shape bg-shape-b" aria-hidden="true"></div>
+
+    <main class="app-shell">
+      <header class="hero">
+        <p class="kicker">Paris Velib helper</p>
+        <h1>is there a velib?</h1>
+        <p class="subtitle">
+          Electric bikes at your home stations, free docks at your work stations.
+        </p>
+      </header>
+
+      <section class="metrics" aria-label="Top metrics">
+        <article class="metric-card metric-home">
+          <h2>Home side</h2>
+          <p class="metric-value" id="homeTotal">-</p>
+          <p class="metric-label">Electric bikes available</p>
+        </article>
+
+        <article class="metric-card metric-work">
+          <h2>Work side</h2>
+          <p class="metric-value" id="workTotal">-</p>
+          <p class="metric-label">Free docks available</p>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Home stations</h2>
+          <span class="chip">Top 3 configured</span>
+        </div>
+        <ul id="homeList" class="station-list" aria-live="polite"></ul>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Work stations</h2>
+          <span class="chip">Top 3 configured</span>
+        </div>
+        <ul id="workList" class="station-list" aria-live="polite"></ul>
+      </section>
+
+      <section class="controls panel">
+        <button id="refreshBtn" type="button">Refresh now</button>
+        <p id="statusText" class="status" role="status" aria-live="polite">
+          Waiting for first fetch...
+        </p>
+        <p id="errorText" class="error" role="alert" hidden></p>
+      </section>
+
+      <footer class="footnote">
+        <p>
+          Source: OpenData Paris Velib station-level feed. Public API does not expose bike-level
+          star ratings or per-bike dock positions.
+        </p>
+      </footer>
+    </main>
+
+    <script src="config.js"></script>
+    <script src="app.js" defer></script>
+  </body>
+</html>
