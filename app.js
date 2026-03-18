@@ -27,6 +27,8 @@ function getConfig() {
   const normalized = {
     homeStationCodes: cfg.homeStationCodes.map((s) => String(s).trim()).filter(Boolean),
     workStationCodes: cfg.workStationCodes.map((s) => String(s).trim()).filter(Boolean),
+    backendUrl: cfg.backendUrl || null,
+    forceOfficalOnly: cfg.forceOfficalOnly || false,
   };
 
   if (normalized.homeStationCodes.length === 0 || normalized.workStationCodes.length === 0) {
@@ -38,6 +40,30 @@ function getConfig() {
 
 function escapeForOdsql(value) {
   return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+function buildGbfsUrl(allStationCodes) {
+  const whereParts = allStationCodes.map(
+    (stationCode) => `stationcode = '${escapeForOdsql(stationCode)}'`
+  );
+
+  const params = new URLSearchParams({
+    select: "name,stationcode,ebike,mechanical,numdocksavailable,duedate,capacity",
+    where: whereParts.join(" OR "),
+    limit: String(Math.max(allStationCodes.length * 3, 20)),
+  });
+
+  return `${DATASET_ENDPOINT}?${params.toString()}`;
+}
+
+function buildBackendUrl(config, allStationCodes) {
+  if (!config.backendUrl || config.forceOfficalOnly) {
+    return null;
+  }
+  const params = new URLSearchParams({
+    stations: allStationCodes.join(","),
+  });
+  return `${config.backendUrl}/api/summary?${params.toString()}`;
 }
 
 function formatTime(value) {
@@ -74,11 +100,11 @@ function clearError() {
   errorText.textContent = "";
 }
 
-function renderStationList(container, stationCodes, valuesByCode, kind) {
+function renderStationList(container, stationCodes, stations, kind) {
   container.innerHTML = "";
 
   for (const stationCode of stationCodes) {
-    const record = valuesByCode.get(stationCode);
+    const station = stations.find((s) => String(s.stationId) === String(stationCode));
     const li = document.createElement("li");
     li.className = "station-item";
 
@@ -87,7 +113,7 @@ function renderStationList(container, stationCodes, valuesByCode, kind) {
 
     const nameEl = document.createElement("span");
     nameEl.className = "station-name";
-    nameEl.textContent = record ? `${record.name} (${record.stationcode})` : `Station ${stationCode}`;
+    nameEl.textContent = station ? `${station.name} (${station.stationId})` : `Station ${stationCode}`;
 
     const valueEl = document.createElement("span");
     valueEl.className = "station-value";
@@ -95,33 +121,19 @@ function renderStationList(container, stationCodes, valuesByCode, kind) {
     const sub = document.createElement("p");
     sub.className = "station-sub";
 
-    if (record) {
-      const value = kind === "home" ? record.ebike : record.numdocksavailable;
+    if (station) {
+      const value = kind === "home" ? station.electric.available : station.docks.available;
       valueEl.textContent = String(value ?? 0);
-      sub.textContent = `Updated ${formatTime(record.duedate)}`;
+      sub.textContent = `Updated ${formatTime(station.lastUpdate)}`;
     } else {
       valueEl.textContent = "N/A";
-      sub.textContent = "Station code not found in current feed response.";
+      sub.textContent = "Station code not found in current data.";
     }
 
     top.append(nameEl, valueEl);
     li.append(top, sub);
     container.appendChild(li);
   }
-}
-
-function buildUrl(allStationCodes) {
-  const whereParts = allStationCodes.map(
-    (stationCode) => `stationcode = '${escapeForOdsql(stationCode)}'`
-  );
-
-  const params = new URLSearchParams({
-    select: "name,stationcode,ebike,numdocksavailable,duedate",
-    where: whereParts.join(" OR "),
-    limit: String(Math.max(allStationCodes.length * 3, 20)),
-  });
-
-  return `${DATASET_ENDPOINT}?${params.toString()}`;
 }
 
 async function fetchAndRender() {
@@ -146,48 +158,102 @@ async function fetchAndRender() {
   const allStationCodes = Array.from(
     new Set([...config.homeStationCodes, ...config.workStationCodes])
   );
-  const url = buildUrl(allStationCodes);
 
   try {
-    const response = await fetch(url, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
-    });
+    let stations;
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status} from data source.`);
-    }
+    // Try backend first if configured
+    const backendUrl = buildBackendUrl(config, allStationCodes);
+    if (backendUrl) {
+      try {
+        setStatus("Fetching from backend...");
+        const response = await fetch(backendUrl, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+          },
+        });
 
-    const payload = await response.json();
-    const records = Array.isArray(payload.results) ? payload.results : [];
+        if (!response.ok) {
+          throw new Error(`Backend returned ${response.status}`);
+        }
 
-    const byCode = new Map();
-    for (const record of records) {
-      if (record && typeof record.stationcode === "string") {
-        byCode.set(record.stationcode, record);
+        const payload = await response.json();
+        stations = payload.stations || [];
+
+        if (stations.length > 0) {
+          setStatus(`Last refresh: ${new Date().toLocaleString()} (via backend)`);
+          clearError();
+        } else {
+          throw new Error("Backend returned empty station list");
+        }
+      } catch (backendError) {
+        console.warn("Backend fetch failed, falling back to direct GBFS:", backendError);
+        // Fall through to direct GBFS fetch
+        stations = null;
       }
     }
 
+    // Fall back to direct GBFS if backend didn't work
+    if (!stations) {
+      setStatus("Fetching from official GBFS API...");
+      const gbfsUrl = buildGbfsUrl(allStationCodes);
+      const response = await fetch(gbfsUrl, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} from GBFS API`);
+      }
+
+      const payload = await response.json();
+      const records = Array.isArray(payload.results) ? payload.results : [];
+
+      // Convert GBFS records to normalized station format
+      stations = records.map((record) => ({
+        stationId: record.stationcode,
+        name: record.name,
+        mechanical: {
+          available: record.mechanical || 0,
+          total: record.capacity || 0,
+          source: "official",
+        },
+        electric: {
+          available: record.ebike || 0,
+          total: record.capacity || 0,
+          source: "official",
+        },
+        docks: {
+          available: record.numdocksavailable || 0,
+          total: record.capacity || 0,
+          source: "official",
+        },
+        lastUpdate: record.duedate || new Date().toISOString(),
+        threeStarBikes: null,
+      }));
+
+      setStatus(`Last refresh: ${new Date().toLocaleString()} (direct GBFS)`);
+      clearError();
+    }
+
     const homeTotalValue = config.homeStationCodes.reduce((sum, stationCode) => {
-      const record = byCode.get(stationCode);
-      return sum + (record ? Number(record.ebike || 0) : 0);
+      const station = stations.find((s) => String(s.stationId) === String(stationCode));
+      return sum + (station ? Number(station.electric.available || 0) : 0);
     }, 0);
 
     const workTotalValue = config.workStationCodes.reduce((sum, stationCode) => {
-      const record = byCode.get(stationCode);
-      return sum + (record ? Number(record.numdocksavailable || 0) : 0);
+      const station = stations.find((s) => String(s.stationId) === String(stationCode));
+      return sum + (station ? Number(station.docks.available || 0) : 0);
     }, 0);
 
     homeTotal.textContent = String(homeTotalValue);
     workTotal.textContent = String(workTotalValue);
 
-    renderStationList(homeList, config.homeStationCodes, byCode, "home");
-    renderStationList(workList, config.workStationCodes, byCode, "work");
-
-    setStatus(`Last refresh: ${new Date().toLocaleString()}`);
-    clearError();
+    renderStationList(homeList, config.homeStationCodes, stations, "home");
+    renderStationList(workList, config.workStationCodes, stations, "work");
   } catch (error) {
     showError(`Refresh failed: ${error.message}`);
     setStatus("Showing last successful values if available.");
